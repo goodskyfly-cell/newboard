@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>籃球戰術盤 (FIBA 規格終極修正版)</title>
+    <style>
+        body { margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; background-color: #1a202c; font-family: sans-serif; color: white; }
+        canvas { background-color: #f39c12; border: 5px solid #5d3a1a; border-radius: 5px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); cursor: grab; }
+        .info { text-align: center; margin-bottom: 10px; }
+    </style>
+</head>
+<body>
+
+<div class="info">
+    <h2>籃球戰術盤 (FIBA 規格修正)</h2>
+    <p>狀態：標線幾何已校正 | 逼真 3D 質感籃球</p>
+</div>
+
+<canvas id="courtCanvas" width="900" height="500"></canvas>
+
+<script>
+    const canvas = document.getElementById('courtCanvas');
+    const ctx = canvas.getContext('2d');
+    const scale = 30; // 1m = 30px
+
+    let items = [];
+    let dragTarget = null;
+
+    function init() {
+        items = [];
+        // 初始球員位置 (B=Blue, R=Red)
+        for(let i=0; i<5; i++) items.push({x: 120, y: 100 + i*75, r: 18, col: '#0984e3', text: 'B'+(i+1)});
+        for(let i=0; i<5; i++) items.push({x: 780, y: 100 + i*75, r: 18, col: '#d63031', text: 'R'+(i+1)});
+        // 逼真籃球物件
+        items.push({x: 450, y: 250, r: 15, type: 'ball'});
+        render();
+    }
+
+    // 1. 繪製逼真質感籃球 (隔離渲染環境)
+    function drawRealBasketball(x, y, r) {
+        ctx.save(); // 強制隔離，防止干擾標線
+        ctx.translate(x, y);
+        
+        // 球體漸層 (模擬光線)
+        let grad = ctx.createRadialGradient(-r*0.3, -r*0.3, r*0.1, 0, 0, r);
+        grad.addColorStop(0, '#f97316');
+        grad.addColorStop(1, '#7c2d12');
+        ctx.fillStyle = grad;
+        ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI*2); ctx.fill();
+
+        // 荔枝皮紋理粒子
+        ctx.fillStyle = "rgba(0,0,0,0.15)";
+        for (let i = 0; i < 200; i++) {
+            let px = (Math.random() - 0.5) * r * 2;
+            let py = (Math.random() - 0.5) * r * 2;
+            if(Math.hypot(px, py) < r * 0.9) {
+                ctx.beginPath(); ctx.arc(px, py, 0.6, 0, Math.PI*2); ctx.fill();
+            }
+        }
+
+        // 立體黑色溝紋
+        ctx.strokeStyle = "rgba(0,0,0,0.7)";
+        ctx.lineWidth = 1.8;
+        // 十字主溝紋
+        ctx.beginPath(); ctx.moveTo(0, -r); ctx.quadraticCurveTo(r*0.1, 0, 0, r); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(-r, 0); ctx.quadraticCurveTo(0, r*0.1, r, 0); ctx.stroke();
+        // 側面弧形溝紋
+        ctx.beginPath(); ctx.arc(-r*1.2, 0, r*1.2, -0.5, 0.5); ctx.stroke();
+        ctx.beginPath(); ctx.arc(r*1.2, 0, r*1.2, Math.PI-0.5, Math.PI+0.5); ctx.stroke();
+
+        ctx.restore(); // 恢復原始畫筆狀態
+    }
+
+    // 2. 繪製精確球場標線 (FIBA 標準)
+    function drawCourtLines() {
+        ctx.strokeStyle = "white";
+        ctx.lineWidth = 2.5;
+
+        // 全場邊線 (28m x 15m)
+        const courtW = 28 * scale;
+        const courtH = 15 * scale;
+        const offsetX = (canvas.width - courtW) / 2;
+        const offsetY = (canvas.height - courtH) / 2;
+        ctx.strokeRect(offsetX, offsetY, courtW, courtH);
+
+        // 中線與中心圓 (1.8m)
+        ctx.beginPath();
+        ctx.moveTo(canvas.width/2, offsetY);
+        ctx.lineTo(canvas.width/2, offsetY + courtH);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(canvas.width/2, canvas.height/2, 1.8 * scale, 0, Math.PI*2);
+        ctx.stroke();
+
+        [true, false].forEach(isLeft => {
+            const side = isLeft ? 1 : -1;
+            const baseLineX = isLeft ? offsetX : offsetX + courtW;
+            const centerY = canvas.height/2;
+            const hoopX = baseLineX + side * 1.575 * scale;
+
+            // --- 三分線精確銜接計算 ---
+            const r3 = 6.75 * scale;
+            const distToSide = 0.9 * scale; // 距離邊線 0.9m
+            const intersectY = (courtH/2) - distToSide;
+            const angle = Math.asin(intersectY / r3);
+
+            ctx.beginPath();
+            // 上底角直線
+            ctx.moveTo(baseLineX, centerY - intersectY);
+            ctx.lineTo(baseLineX + side * 1.575 * scale, centerY - intersectY);
+            // 三分弧
+            ctx.arc(hoopX, centerY, r3, isLeft ? -angle : Math.PI + angle, isLeft ? angle : Math.PI - angle, !isLeft);
+            // 下底角直線
+            ctx.lineTo(baseLineX, centerY + intersectY);
+            ctx.stroke();
+
+            // 禁區 (5.8m x 4.9m)
+            const keyW = 5.8 * scale;
+            const keyH = 4.9 * scale;
+            ctx.strokeRect(isLeft ? baseLineX : baseLineX - keyW, centerY - keyH/2, keyW, keyH);
+
+            // 罰球圓圈
+            ctx.beginPath();
+            ctx.arc(baseLineX + side * 5.8 * scale, centerY, 1.8 * scale, 0, Math.PI*2);
+            ctx.stroke();
+
+            // 籃框與籃板
+            ctx.beginPath(); ctx.arc(hoopX, centerY, 7, 0, Math.PI*2); ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(baseLineX + side * 1.2 * scale, centerY - 25);
+            ctx.lineTo(baseLineX + side * 1.2 * scale, centerY + 25);
+            ctx.stroke();
+        });
+    }
+
+    function render() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        drawCourtLines(); // 先畫底層標線
+        
+        items.forEach(p => {
+            if(p.type === 'ball') {
+                drawRealBasketball(p.x, p.y, p.r);
+            } else {
+                // 繪製球員
+                ctx.save();
+                ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI*2);
+                ctx.fillStyle = p.col; ctx.shadowBlur = 10; ctx.shadowColor = "black"; ctx.fill();
+                ctx.strokeStyle = "white"; ctx.lineWidth = 2; ctx.stroke();
+                ctx.fillStyle = "white"; ctx.font = "bold 14px Arial"; ctx.textAlign = "center";
+                ctx.textBaseline = "middle"; ctx.fillText(p.text, p.x, p.y);
+                ctx.restore();
+            }
+        });
+    }
+
+    // 交互邏輯 (滑鼠與觸控)
+    function getPos(e) {
+        const r = canvas.getBoundingClientRect();
+        const cx = e.touches ? e.touches[0].clientX : e.clientX;
+        const cy = e.touches ? e.touches[0].clientY : e.clientY;
+        return { x: cx - r.left, y: cy - r.top };
+    }
+
+    canvas.addEventListener('mousedown', e => {
+        const p = getPos(e);
+        items.forEach(i => { if(Math.hypot(i.x - p.x, i.y - p.y) < i.r) dragTarget = i; });
+    });
+
+    window.addEventListener('mousemove', e => {
+        if(!dragTarget) return;
+        const p = getPos(e);
+        dragTarget.x = p.x; dragTarget.y = p.y;
+        render();
+    });
+
+    window.addEventListener('mouseup', () => dragTarget = null);
+    canvas.addEventListener('touchstart', e => {
+        const p = getPos(e);
+        items.forEach(i => { if(Math.hypot(i.x - p.x, i.y - p.y) < i.r) dragTarget = i; });
+        e.preventDefault();
+    }, {passive: false});
+
+    init();
+</script>
+</body>
+</html>
