@@ -2,30 +2,47 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>籃球戰術盤 - 完整標線與12球員版</title>
+    <title>籃球戰術盤 - 原始標線+語音清除版</title>
     <style>
         body { margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; background-color: #1a202c; font-family: sans-serif; color: white; }
         canvas { background-color: #f39c12; border: 5px solid #5d3a1a; border-radius: 5px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); cursor: grab; touch-action: none; }
         .info { text-align: center; margin-bottom: 10px; }
-        #status { font-size: 0.9em; color: #f6ad55; }
+        
+        /* 語音功能區塊 */
+        .voice-container { width: 900px; margin-top: 20px; background: #2d3748; padding: 15px; border-radius: 8px; border: 1px solid #4a5568; }
+        .button-group { display: flex; gap: 10px; margin-bottom: 10px; }
+        
+        button { padding: 10px 25px; color: white; border: none; border-radius: 5px; font-weight: bold; cursor: pointer; transition: 0.2s; }
+        #mic-btn { background: #3182ce; }
+        #mic-btn.recording { background: #e53e3e; }
+        #clear-btn { background: #718096; }
+        #clear-btn:hover { background: #4a5568; }
+        
+        #transcript { background: #1a202c; padding: 15px; border-radius: 5px; min-height: 50px; color: #cbd5e0; line-height: 1.5; border: 1px inset #4a5568; }
     </style>
 </head>
 <body>
 
 <div class="info">
-    <h2>籃球戰術盤 (FIBA 規格修正)</h2>
-    <p id="status">正在載入球員圖資...</p>
+    <h2>籃球戰術盤 (原始標線版)</h2>
+    <p>狀態：標線已還原 | 語音轉錄與清除功能</p>
 </div>
 
 <canvas id="courtCanvas" width="900" height="600"></canvas>
 
+<div class="voice-container">
+    <div class="button-group">
+        <button id="mic-btn">🎤 開始語音記錄</button>
+        <button id="clear-btn">🗑️ 清除文字</button>
+    </div>
+    <div id="transcript">語音紀錄將顯示於此...</div>
+</div>
+
 <script>
     const canvas = document.getElementById('courtCanvas');
     const ctx = canvas.getContext('2d');
-    const statusText = document.getElementById('status');
     const scale = 30; // 1m = 30px
 
-    // 球員頭像清單 (GitHub Raw 連結)
     const imgNames = ["01.png", "05.png", "06.png", "07.png", "08.png", "09.png", "10.png", "12.png", "13.png", "15.png", "23.png", "89.png"];
     const imgUrls = imgNames.map(name => `https://raw.githubusercontent.com/goodskyfly-cell/newboard/main/${name}`);
 
@@ -33,45 +50,29 @@
     let dragTarget = null;
     let images = [];
 
-    // 1. 預載入圖片程序
-    async function preloadImages() {
-        try {
-            const promises = imgUrls.map(url => {
-                return new Promise((resolve, reject) => {
-                    const img = new Image();
-                    img.crossOrigin = "anonymous"; 
-                    img.src = url;
-                    img.onload = () => resolve(img);
-                    img.onerror = () => reject(`載入失敗: ${url}`);
-                });
+    // 1. 初始化與圖片載入
+    async function init() {
+        const promises = imgUrls.map(url => {
+            return new Promise(res => {
+                const img = new Image();
+                img.crossOrigin = "anonymous";
+                img.src = url;
+                img.onload = () => res(img);
             });
-            images = await Promise.all(promises);
-            statusText.innerText = "● 標線已校正 | 球員已就位 (下方板凳區)";
-            initBoard();
-        } catch (err) {
-            statusText.innerText = "圖片載入發生錯誤";
-            console.error(err);
-        }
-    }
-
-    // 2. 初始化物件位置
-    function initBoard() {
-        items = [];
-        const radius = 22; 
-        const startX = 55;
-        const spacing = 72;
-
-        // 將 12 名球員排列在畫布底部 (y=540)
-        images.forEach((img, i) => {
-            items.push({ x: startX + i * spacing, y: 540, r: radius, img: img, type: 'player' });
         });
-
-        // 初始籃球位置
+        images = await Promise.all(promises);
+        
+        // 初始球員位置 (放置於下方邊線外)
+        images.forEach((img, i) => {
+            items.push({ x: 55 + i * 72, y: 545, r: 24, img: img, type: 'player' });
+        });
+        
+        // 籃球物件
         items.push({ x: 450, y: 250, r: 15, type: 'ball' });
         render();
     }
 
-    // 3. 繪製精確球場標線 (根據原始 FIBA 邏輯)
+    // 2. 原始精確球場標線 (還原原始邏輯)
     function drawCourtLines() {
         ctx.strokeStyle = "white";
         ctx.lineWidth = 2.5;
@@ -79,12 +80,9 @@
         const courtW = 28 * scale;
         const courtH = 15 * scale;
         const offsetX = (canvas.width - courtW) / 2;
-        const offsetY = 50; // 距離頂部偏移
-
-        // 全場邊線
+        const offsetY = 50; 
         ctx.strokeRect(offsetX, offsetY, courtW, courtH);
 
-        // 中線與中心圓
         ctx.beginPath();
         ctx.moveTo(canvas.width/2, offsetY);
         ctx.lineTo(canvas.width/2, offsetY + courtH);
@@ -98,8 +96,6 @@
             const baseLineX = isLeft ? offsetX : offsetX + courtW;
             const centerY = offsetY + courtH/2;
             const hoopX = baseLineX + side * 1.575 * scale;
-
-            // 三分線計算
             const r3 = 6.75 * scale;
             const distToSide = 0.9 * scale; 
             const intersectY = (courtH/2) - distToSide;
@@ -112,17 +108,14 @@
             ctx.lineTo(baseLineX, centerY + intersectY);
             ctx.stroke();
 
-            // 禁區 (5.8m x 4.9m)
             const keyW = 5.8 * scale;
             const keyH = 4.9 * scale;
             ctx.strokeRect(isLeft ? baseLineX : baseLineX - keyW, centerY - keyH/2, keyW, keyH);
 
-            // 罰球圓圈 (完整圓形)
             ctx.beginPath();
             ctx.arc(baseLineX + side * 5.8 * scale, centerY, 1.8 * scale, 0, Math.PI*2);
             ctx.stroke();
 
-            // 籃框與籃板
             ctx.beginPath(); ctx.arc(hoopX, centerY, 7, 0, Math.PI*2); ctx.stroke();
             ctx.beginPath();
             ctx.moveTo(baseLineX + side * 1.2 * scale, centerY - 25);
@@ -131,43 +124,79 @@
         });
     }
 
-    // 4. 繪製籃球
-    function drawBall(x, y, r) {
-        ctx.save();
-        ctx.translate(x, y);
-        let grad = ctx.createRadialGradient(-r*0.3, -r*0.3, r*0.1, 0, 0, r);
-        grad.addColorStop(0, '#f97316');
-        grad.addColorStop(1, '#7c2d12');
-        ctx.fillStyle = grad;
-        ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI*2); ctx.fill();
-        ctx.strokeStyle = "rgba(0,0,0,0.7)"; ctx.lineWidth = 1.5;
-        ctx.beginPath(); ctx.moveTo(0, -r); ctx.lineTo(0, r); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(-r, 0); ctx.lineTo(r, 0); ctx.stroke();
-        ctx.restore();
-    }
-
     function render() {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         drawCourtLines();
         
         items.forEach(p => {
+            ctx.save();
             if(p.type === 'ball') {
-                drawBall(p.x, p.y, p.r);
+                ctx.translate(p.x, p.y);
+                let grad = ctx.createRadialGradient(-p.r*0.3, -p.r*0.3, p.r*0.1, 0, 0, p.r);
+                grad.addColorStop(0, '#f97316'); grad.addColorStop(1, '#7c2d12');
+                ctx.fillStyle = grad;
+                ctx.beginPath(); ctx.arc(0, 0, p.r, 0, Math.PI*2); ctx.fill();
+                ctx.strokeStyle = "rgba(0,0,0,0.6)"; ctx.lineWidth = 1.5;
+                ctx.beginPath(); ctx.moveTo(0, -p.r); ctx.lineTo(0, p.r); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(-p.r, 0); ctx.lineTo(p.r, 0); ctx.stroke();
             } else {
-                ctx.save();
-                ctx.beginPath();
-                ctx.arc(p.x, p.y, p.r, 0, Math.PI*2);
+                ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI*2);
                 ctx.shadowBlur = 10; ctx.shadowColor = "black";
                 ctx.fillStyle = "white"; ctx.fill();
                 ctx.strokeStyle = "white"; ctx.lineWidth = 2; ctx.stroke();
                 ctx.clip();
                 ctx.drawImage(p.img, p.x - p.r, p.y - p.r, p.r * 2, p.r * 2);
-                ctx.restore();
             }
+            ctx.restore();
         });
     }
 
-    // 5. 交互邏輯
+    // 3. 繁體中文語音轉文字功能
+    const micBtn = document.getElementById('mic-btn');
+    const clearBtn = document.getElementById('clear-btn');
+    const transcriptDiv = document.getElementById('transcript');
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    if (SpeechRecognition) {
+        const recognition = new SpeechRecognition();
+        recognition.lang = 'zh-TW';
+        recognition.interimResults = true;
+        recognition.continuous = true;
+
+        let isRecording = false;
+
+        micBtn.onclick = () => {
+            if (!isRecording) {
+                recognition.start();
+                micBtn.innerText = "🛑 停止紀錄";
+                micBtn.classList.add('recording');
+                isRecording = true;
+            } else {
+                recognition.stop();
+                micBtn.innerText = "🎤 開始語音記錄";
+                micBtn.classList.remove('recording');
+                isRecording = false;
+            }
+        };
+
+        recognition.onresult = (event) => {
+            let resultText = "";
+            for (let i = event.resultIndex; i < event.results.length; i++) {
+                resultText += event.results[i][0].transcript;
+            }
+            transcriptDiv.innerText = resultText;
+        };
+
+        // 清除文字功能
+        clearBtn.onclick = () => {
+            transcriptDiv.innerText = "語音紀錄已清除...";
+        };
+
+    } else {
+        transcriptDiv.innerText = "瀏覽器不支援 Speech API";
+    }
+
+    // 4. 交互邏輯
     function getPos(e) {
         const r = canvas.getBoundingClientRect();
         const cx = e.touches ? e.touches[0].clientX : e.clientX;
@@ -179,8 +208,7 @@
         const p = getPos(e);
         for(let i = items.length - 1; i >= 0; i--) {
             if(Math.hypot(items[i].x - p.x, items[i].y - p.y) < items[i].r) {
-                dragTarget = items[i];
-                break;
+                dragTarget = items[i]; break;
             }
         }
     });
@@ -188,8 +216,7 @@
     window.addEventListener('mousemove', e => {
         if(!dragTarget) return;
         const p = getPos(e);
-        dragTarget.x = p.x; dragTarget.y = p.y;
-        render();
+        dragTarget.x = p.x; dragTarget.y = p.y; render();
     });
 
     window.addEventListener('mouseup', () => dragTarget = null);
@@ -198,24 +225,22 @@
         const p = getPos(e);
         for(let i = items.length - 1; i >= 0; i--) {
             if(Math.hypot(items[i].x - p.x, items[i].y - p.y) < items[i].r) {
-                dragTarget = items[i];
-                break;
+                dragTarget = items[i]; break;
             }
         }
-        if (dragTarget) e.preventDefault();
+        if(dragTarget) e.preventDefault();
     }, {passive: false});
 
     window.addEventListener('touchmove', e => {
         if(!dragTarget) return;
         const p = getPos(e);
-        dragTarget.x = p.x; dragTarget.y = p.y;
-        render();
+        dragTarget.x = p.x; dragTarget.y = p.y; render();
         e.preventDefault();
     }, {passive: false});
 
     window.addEventListener('touchend', () => dragTarget = null);
 
-    preloadImages();
+    init();
 </script>
 </body>
 </html>
